@@ -117,15 +117,16 @@ backup_once() {
 backup_once "$EXTENSION_JS"
 backup_once "$ASSET_FILE"
 
-EXTENSION_ALREADY_PATCHED=0
-ASSET_ALREADY_PATCHED=0
 EXTENSION_PATCHED=0
 ASSET_PATCHED=0
 
-if grep -q 'ne(null)' "$EXTENSION_JS"; then
-  EXTENSION_ALREADY_PATCHED=1
-elif grep -q 'wl("Not a git repository")' "$EXTENSION_JS"; then
-  perl -0pi -e 's/wl\\("Not a git repository"\\)/ne(null)/g' "$EXTENSION_JS"
+EXTENSION_SEARCH='if(!o)return r.watchForGitInit===!0?await this.ensureWatchingForGitInit(r.cwd,n):r.watchForGitInit===!1&&this.disposeGitInitWatcher(r.cwd,n),wl("Not a git repository");'
+EXTENSION_REPLACE='if(!o)return r.watchForGitInit===!0?await this.ensureWatchingForGitInit(r.cwd,n):r.watchForGitInit===!1&&this.disposeGitInitWatcher(r.cwd,n),ne(null);'
+
+if grep -Fq "$EXTENSION_REPLACE" "$EXTENSION_JS"; then
+  :
+elif grep -Fq "$EXTENSION_SEARCH" "$EXTENSION_JS"; then
+  OLD="$EXTENSION_SEARCH" NEW="$EXTENSION_REPLACE" perl -0pi -e 's/\Q$ENV{OLD}\E/$ENV{NEW}/g' "$EXTENSION_JS"
   EXTENSION_PATCHED=1
 else
   echo "Could not find extension.js patch marker. Bundle format may have changed."
@@ -136,9 +137,9 @@ ASSET_REPLACE='queryFn:({signal:t})=>e?m(`git`).request({method:`stable-metadata
 ASSET_SEARCH='queryFn:({signal:t})=>e?m(`git`).request({method:`stable-metadata`,params:{cwd:r(String(e)),hostConfig:n,...a?.watchForGitInit==null?{}:{watchForGitInit:a.watchForGitInit}},signal:t}):Promise.reject(Error(`Missing cwd`))'
 
 if grep -Fq "$ASSET_REPLACE" "$ASSET_FILE"; then
-  ASSET_ALREADY_PATCHED=1
+  :
 elif grep -Fq "$ASSET_SEARCH" "$ASSET_FILE"; then
-  perl -0pi -e 's/queryFn:\(\{signal:t\}\)=>e\?m\(`git`\)\.request\(\{method:`stable-metadata`,params:\{cwd:r\(String\(e\)\),hostConfig:n,\.\.\.a\?\.watchForGitInit==null\?\{\}:\{watchForGitInit:a.watchForGitInit\}\},signal:t\}\):Promise\.reject\(Error\(`Missing cwd`\)\)/queryFn:({signal:t})=>e?m(`git`).request({method:`stable-metadata`,params:{cwd:r(String(e)),hostConfig:n,...a?.watchForGitInit==null?{}:{watchForGitInit:a.watchForGitInit}},signal:t}).catch(()=>null):Promise.resolve(null)/g' "$ASSET_FILE"
+  OLD="$ASSET_SEARCH" NEW="$ASSET_REPLACE" perl -0pi -e 's/\Q$ENV{OLD}\E/$ENV{NEW}/g' "$ASSET_FILE"
   ASSET_PATCHED=1
 else
   echo "Could not find webview patch marker in: $ASSET_FILE"
