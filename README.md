@@ -1,46 +1,56 @@
-# Patch Codex Extension
+# Codex Extension Stable Metadata Patch
 
 Temporary local hotfix for the Codex / ChatGPT IDE extension `stable-metadata` loop in non-git folders.
 
-## What it fixes
+This repo exists for people who hit the extension bug where opening Codex in a folder without `.git` causes repeated `stable-metadata` failures, log spam, and high CPU usage in Cursor or VS Code.
 
-When Codex is opened in a folder that is not initialized as a Git repository, some extension builds can enter a tight loop like:
+## Symptom
+
+Affected extension builds can start spamming lines like:
 
 ```text
 worker_rpc_response_error error={} method=stable-metadata workerId=git
 ```
 
-Symptoms:
+Common effects:
 
-- high renderer / plugin CPU usage
+- high renderer or plugin CPU usage
 - noisy Codex logs
 - laggy chat list or IDE UI
+- significantly worse behavior in folders that are not initialized as Git repos
 
-This patch changes the extension so the "not a git repository" case is treated as an empty state instead of an error.
+## What this patch does
+
+The patch changes the extension so the "not a git repository" case is treated as an empty state instead of a hard error.
+
+It patches two places:
+
+1. the extension host bundle
+2. the webview asset that requests `stable-metadata`
+
+## Quick Start
+
+Run:
+
+```bash
+bash patch-codex-stable-metadata.sh
+```
+
+Then reload the editor window:
+
+- Cursor: `Developer: Reload Window`
+- VS Code: `Developer: Reload Window`
 
 ## Files
 
 - `patch-codex-stable-metadata.sh`
 - `restore-codex-stable-metadata.sh`
+- `LICENSE`
 
 ## Supported targets
 
 - Cursor: `~/.cursor/extensions`
 - VS Code: `~/.vscode/extensions`
-
-The patch script automatically:
-
-1. finds the newest `openai.chatgpt-*` extension folder
-2. creates backups with `.stable-metadata.bak`
-3. patches both the extension host bundle and the webview asset
-
-## Apply
-
-From this folder:
-
-```bash
-bash patch-codex-stable-metadata.sh
-```
 
 If you want to target a specific editor explicitly:
 
@@ -49,10 +59,15 @@ bash patch-codex-stable-metadata.sh ~/.cursor/extensions
 bash patch-codex-stable-metadata.sh ~/.vscode/extensions
 ```
 
-Then reload the editor window:
+## How it works
 
-- Cursor: `Developer: Reload Window`
-- VS Code: `Developer: Reload Window`
+The patch script automatically:
+
+1. finds the newest `openai.chatgpt-*` extension folder
+2. creates backups with `.stable-metadata.bak`
+3. patches both the extension host bundle and the webview asset
+
+The script is designed to be idempotent. If the extension is already patched, it should report that and exit cleanly.
 
 ## Verify
 
@@ -61,9 +76,12 @@ Open a folder that is not a git repo and then open Codex.
 Expected result:
 
 - the UI no longer spins CPU because of `stable-metadata`
-- the log spam for `worker_rpc_response_error ... stable-metadata` stops or drops dramatically
+- log spam for `worker_rpc_response_error ... stable-metadata` stops or drops dramatically
+- Codex behaves normally in a non-git folder, or at least much better than before
 
 ## Roll Back
+
+Use:
 
 ```bash
 bash restore-codex-stable-metadata.sh
@@ -83,3 +101,12 @@ Reload the editor window after restore.
 - This is a local binary-bundle patch, not an official upstream fix.
 - After the extension updates, you may need to run the patch again.
 - This patch targets the `stable-metadata` loop only. It does not fix unrelated extension issues.
+- If the extension bundle format changes, the patch markers may stop matching and the script may need an update.
+
+## Upstream context
+
+This patch was put together as a practical workaround for the Codex extension issue family around `stable-metadata` loops in non-git folders.
+
+## License
+
+MIT. See [LICENSE](LICENSE).
