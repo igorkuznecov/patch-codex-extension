@@ -63,9 +63,9 @@ bash patch-codex-stable-metadata.sh ~/.vscode/extensions
 
 The patch script automatically:
 
-1. finds the newest `openai.chatgpt-*` extension folder
+1. finds all installed `openai.chatgpt-*` extension folders
 2. creates backups with `.stable-metadata.bak`
-3. patches both the extension host bundle and the webview asset
+3. patches both the extension host bundle and the webview asset in each matching version
 
 The script is designed to be idempotent. If the extension is already patched, it should report that and exit cleanly.
 

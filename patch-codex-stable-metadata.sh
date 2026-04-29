@@ -13,7 +13,7 @@ Examples:
   patch-codex-stable-metadata.sh ~/.vscode/extensions
 
 What it does:
-  - finds the newest openai.chatgpt-* extension directory
+  - finds all openai.chatgpt-* extension directories
   - creates .stable-metadata.bak backups
   - patches the stable-metadata non-git error loop
 
@@ -58,53 +58,20 @@ if [[ ! -d "$EXTENSIONS_ROOT" ]]; then
   exit 1
 fi
 
-find_latest_extension_dir() {
-  local root="$1"
-  local latest_dir
-  latest_dir="$(
-    find "$root" -maxdepth 1 -type d -name 'openai.chatgpt-*' -print 2>/dev/null \
-      | while IFS= read -r dir; do
-          stat -f '%m %N' "$dir"
-        done \
-      | sort -nr \
-      | head -n 1 \
-      | cut -d' ' -f2-
-  )"
+EXTENSION_DIRS=()
+while IFS= read -r dir; do
+  EXTENSION_DIRS+=("$dir")
+done < <(find "$EXTENSIONS_ROOT" -maxdepth 1 -type d -name 'openai.chatgpt-*' -print 2>/dev/null | sort)
 
-  if [[ -z "$latest_dir" ]]; then
-    return 1
-  fi
-
-  printf '%s\n' "$latest_dir"
-}
-
-EXTENSION_DIR="$(find_latest_extension_dir "$EXTENSIONS_ROOT")" || {
-  echo "No openai.chatgpt-* extension folder found under: $EXTENSIONS_ROOT"
-  exit 1
-}
-
-EXTENSION_JS="$EXTENSION_DIR/out/extension.js"
-if [[ ! -f "$EXTENSION_JS" ]]; then
-  echo "extension.js not found: $EXTENSION_JS"
+if [[ "${#EXTENSION_DIRS[@]}" -eq 0 ]]; then
+  echo "No openai.chatgpt-* extension folders found under: $EXTENSIONS_ROOT"
   exit 1
 fi
 
-ASSET_FILE="$(
-  find "$EXTENSION_DIR/webview/assets" -maxdepth 1 -type f \
-    \( -name 'use-git-stable-metadata-*.js' -o -name 'globe-*.js' \) \
-    -print 2>/dev/null \
-    | while IFS= read -r file; do
-        if grep -q 'method:`stable-metadata`' "$file"; then
-          printf '%s\n' "$file"
-        fi
-      done \
-    | head -n 1
-)"
-
-if [[ -z "$ASSET_FILE" ]]; then
-  echo "Could not find a webview asset that contains stable-metadata."
-  exit 1
-fi
+EXTENSION_SEARCH='if(!o)return r.watchForGitInit===!0?await this.ensureWatchingForGitInit(r.cwd,n):r.watchForGitInit===!1&&this.disposeGitInitWatcher(r.cwd,n),wl("Not a git repository");'
+EXTENSION_REPLACE='if(!o)return r.watchForGitInit===!0?await this.ensureWatchingForGitInit(r.cwd,n):r.watchForGitInit===!1&&this.disposeGitInitWatcher(r.cwd,n),ne(null);'
+ASSET_REPLACE='queryFn:({signal:t})=>e?m(`git`).request({method:`stable-metadata`,params:{cwd:r(String(e)),hostConfig:n,...a?.watchForGitInit==null?{}:{watchForGitInit:a.watchForGitInit}},signal:t}).catch(()=>null):Promise.resolve(null)'
+ASSET_SEARCH='queryFn:({signal:t})=>e?m(`git`).request({method:`stable-metadata`,params:{cwd:r(String(e)),hostConfig:n,...a?.watchForGitInit==null?{}:{watchForGitInit:a.watchForGitInit}},signal:t}):Promise.reject(Error(`Missing cwd`))'
 
 backup_once() {
   local file="$1"
@@ -114,52 +81,78 @@ backup_once() {
   fi
 }
 
-backup_once "$EXTENSION_JS"
-backup_once "$ASSET_FILE"
+PATCHED_ANY=0
 
-EXTENSION_PATCHED=0
-ASSET_PATCHED=0
+for EXTENSION_DIR in "${EXTENSION_DIRS[@]}"; do
+  EXTENSION_JS="$EXTENSION_DIR/out/extension.js"
+  if [[ ! -f "$EXTENSION_JS" ]]; then
+    echo "Skipping $(basename "$EXTENSION_DIR"): missing out/extension.js"
+    continue
+  fi
 
-EXTENSION_SEARCH='if(!o)return r.watchForGitInit===!0?await this.ensureWatchingForGitInit(r.cwd,n):r.watchForGitInit===!1&&this.disposeGitInitWatcher(r.cwd,n),wl("Not a git repository");'
-EXTENSION_REPLACE='if(!o)return r.watchForGitInit===!0?await this.ensureWatchingForGitInit(r.cwd,n):r.watchForGitInit===!1&&this.disposeGitInitWatcher(r.cwd,n),ne(null);'
+  ASSET_FILE="$(
+    find "$EXTENSION_DIR/webview/assets" -maxdepth 1 -type f \
+      \( -name 'use-git-stable-metadata-*.js' -o -name 'globe-*.js' \) \
+      -print 2>/dev/null \
+      | while IFS= read -r file; do
+          if grep -q 'method:`stable-metadata`' "$file"; then
+            printf '%s\n' "$file"
+          fi
+        done \
+      | head -n 1
+  )"
 
-if grep -Fq "$EXTENSION_REPLACE" "$EXTENSION_JS"; then
-  :
-elif grep -Fq "$EXTENSION_SEARCH" "$EXTENSION_JS"; then
-  OLD="$EXTENSION_SEARCH" NEW="$EXTENSION_REPLACE" perl -0pi -e 's/\Q$ENV{OLD}\E/$ENV{NEW}/g' "$EXTENSION_JS"
-  EXTENSION_PATCHED=1
-else
-  echo "Could not find extension.js patch marker. Bundle format may have changed."
-  exit 1
-fi
+  if [[ -z "$ASSET_FILE" ]]; then
+    echo "Skipping $(basename "$EXTENSION_DIR"): could not find stable-metadata asset"
+    continue
+  fi
 
-ASSET_REPLACE='queryFn:({signal:t})=>e?m(`git`).request({method:`stable-metadata`,params:{cwd:r(String(e)),hostConfig:n,...a?.watchForGitInit==null?{}:{watchForGitInit:a.watchForGitInit}},signal:t}).catch(()=>null):Promise.resolve(null)'
-ASSET_SEARCH='queryFn:({signal:t})=>e?m(`git`).request({method:`stable-metadata`,params:{cwd:r(String(e)),hostConfig:n,...a?.watchForGitInit==null?{}:{watchForGitInit:a.watchForGitInit}},signal:t}):Promise.reject(Error(`Missing cwd`))'
+  backup_once "$EXTENSION_JS"
+  backup_once "$ASSET_FILE"
 
-if grep -Fq "$ASSET_REPLACE" "$ASSET_FILE"; then
-  :
-elif grep -Fq "$ASSET_SEARCH" "$ASSET_FILE"; then
-  OLD="$ASSET_SEARCH" NEW="$ASSET_REPLACE" perl -0pi -e 's/\Q$ENV{OLD}\E/$ENV{NEW}/g' "$ASSET_FILE"
-  ASSET_PATCHED=1
-else
-  echo "Could not find webview patch marker in: $ASSET_FILE"
-  exit 1
-fi
+  EXTENSION_PATCHED=0
+  ASSET_PATCHED=0
 
-if [[ "$EXTENSION_PATCHED" -eq 0 && "$ASSET_PATCHED" -eq 0 ]]; then
-  echo "Codex extension already has the stable-metadata patch."
-  echo "Extension: $(basename "$EXTENSION_DIR")"
-  echo "Extension file: $EXTENSION_JS"
-  echo "Asset file: $ASSET_FILE"
+  if grep -Fq "$EXTENSION_REPLACE" "$EXTENSION_JS"; then
+    :
+  elif grep -Fq "$EXTENSION_SEARCH" "$EXTENSION_JS"; then
+    OLD="$EXTENSION_SEARCH" NEW="$EXTENSION_REPLACE" perl -0pi -e 's/\Q$ENV{OLD}\E/$ENV{NEW}/g' "$EXTENSION_JS"
+    EXTENSION_PATCHED=1
+  else
+    echo "Skipping $(basename "$EXTENSION_DIR"): extension.js patch marker not found"
+    continue
+  fi
+
+  if grep -Fq "$ASSET_REPLACE" "$ASSET_FILE"; then
+    :
+  elif grep -Fq "$ASSET_SEARCH" "$ASSET_FILE"; then
+    OLD="$ASSET_SEARCH" NEW="$ASSET_REPLACE" perl -0pi -e 's/\Q$ENV{OLD}\E/$ENV{NEW}/g' "$ASSET_FILE"
+    ASSET_PATCHED=1
+  else
+    echo "Skipping $(basename "$EXTENSION_DIR"): asset patch marker not found"
+    continue
+  fi
+
+  if [[ "$EXTENSION_PATCHED" -eq 0 && "$ASSET_PATCHED" -eq 0 ]]; then
+    echo "Already patched: $(basename "$EXTENSION_DIR")"
+    echo "  Extension file: $EXTENSION_JS"
+    echo "  Asset file: $ASSET_FILE"
+    continue
+  fi
+
+  PATCHED_ANY=1
+  echo "Patched: $(basename "$EXTENSION_DIR")"
+  echo "  Extension file: $EXTENSION_JS"
+  echo "  Asset file: $ASSET_FILE"
+  echo "  Extension backup: ${EXTENSION_JS}.stable-metadata.bak"
+  echo "  Asset backup: ${ASSET_FILE}.stable-metadata.bak"
+done
+
+echo
+echo "Extensions root: $EXTENSIONS_ROOT"
+echo "Processed ${#EXTENSION_DIRS[@]} extension director$( [[ ${#EXTENSION_DIRS[@]} -eq 1 ]] && printf 'y' || printf 'ies' )."
+echo "Reload Cursor/VS Code window to apply the change."
+
+if [[ "$PATCHED_ANY" -eq 0 ]]; then
   exit 0
 fi
-
-echo "Patched Codex extension successfully."
-echo "Extension: $(basename "$EXTENSION_DIR")"
-echo "Extensions root: $EXTENSIONS_ROOT"
-echo "Extension file: $EXTENSION_JS"
-echo "Asset file: $ASSET_FILE"
-echo "Extension backup: ${EXTENSION_JS}.stable-metadata.bak"
-echo "Asset backup: ${ASSET_FILE}.stable-metadata.bak"
-echo
-echo "Reload Cursor/VS Code window to apply the change."

@@ -44,18 +44,13 @@ EXTENSIONS_ROOT="$(choose_root "${1:-}")" || {
   exit 1
 }
 
-EXTENSION_DIR="$(
-  find "$EXTENSIONS_ROOT" -maxdepth 1 -type d -name 'openai.chatgpt-*' -print 2>/dev/null \
-    | while IFS= read -r dir; do
-        stat -f '%m %N' "$dir"
-      done \
-    | sort -nr \
-    | head -n 1 \
-    | cut -d' ' -f2-
-)"
+EXTENSION_DIRS=()
+while IFS= read -r dir; do
+  EXTENSION_DIRS+=("$dir")
+done < <(find "$EXTENSIONS_ROOT" -maxdepth 1 -type d -name 'openai.chatgpt-*' -print 2>/dev/null | sort)
 
-if [[ -z "$EXTENSION_DIR" ]]; then
-  echo "No openai.chatgpt-* extension folder found under: $EXTENSIONS_ROOT"
+if [[ "${#EXTENSION_DIRS[@]}" -eq 0 ]]; then
+  echo "No openai.chatgpt-* extension folders found under: $EXTENSIONS_ROOT"
   exit 1
 fi
 
@@ -68,14 +63,18 @@ restore_one() {
   fi
 }
 
-restore_one "$EXTENSION_DIR/out/extension.js"
+for EXTENSION_DIR in "${EXTENSION_DIRS[@]}"; do
+  restore_one "$EXTENSION_DIR/out/extension.js"
 
-find "$EXTENSION_DIR/webview/assets" -maxdepth 1 -type f \
-  \( -name 'use-git-stable-metadata-*.js' -o -name 'globe-*.js' \) \
-  -print 2>/dev/null \
-  | while IFS= read -r file; do
-      restore_one "$file"
-    done
+  find "$EXTENSION_DIR/webview/assets" -maxdepth 1 -type f \
+    \( -name 'use-git-stable-metadata-*.js' -o -name 'globe-*.js' \) \
+    -print 2>/dev/null \
+    | while IFS= read -r file; do
+        restore_one "$file"
+      done
+done
 
 echo
+echo "Extensions root: $EXTENSIONS_ROOT"
+echo "Processed ${#EXTENSION_DIRS[@]} extension director$( [[ ${#EXTENSION_DIRS[@]} -eq 1 ]] && printf 'y' || printf 'ies' )."
 echo "Reload Cursor/VS Code window to apply the restored files."
